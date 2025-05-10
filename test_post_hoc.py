@@ -283,10 +283,10 @@ if __name__ == '__main__':
     args = post_hoc_args()
 
     # Seeds, architectures, loss types, and datasets
-    seeds = [40, 41, 42, 25, 52] # , 41, 42, 25, 52
-    archs = ['resnet50', 'wrn', 'resnet110', 'PreResNet56', 'densenet121']
+    seeds = [40] # , 41, 42, 25, 52
+    archs = ['resnet50']
     
-    datasets = ['cifar10', 'cifar100']
+    datasets = ['cifar10']
     args.gamma = 0.5
     # Iterate over all combinations
     for args.seed in seeds:
