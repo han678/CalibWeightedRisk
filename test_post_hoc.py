@@ -219,10 +219,9 @@ def main(args):
     loss_type = args.loss_type
     regularization_strength = args.regularization_strength
     loss, loss_name = get_loss_function_and_name(args, loss_type, score_function, input_is_softmax=False, regularization_strength=regularization_strength)
-    loss_name = args.loss_type 
     # Load logits
-    train_file = f'{save_npz_path}/{args.arch}_{args.loss_name}_seed{args.seed}_train_logits.npz'
-    test_file = f'{save_npz_path}/{args.arch}_{args.loss_name}_seed{args.seed}_test_logits.npz'
+    train_file = f'{save_npz_path}/{args.arch}_{args.loss_type}_seed{args.seed}_train_logits.npz'
+    test_file = f'{save_npz_path}/{args.arch}_{args.loss_type}_seed{args.seed}_test_logits.npz'
     train_loader = load_logits_as_dataloader(train_file, batch_size=128, shuffle=False, device=device)
     test_loader = load_logits_as_dataloader(test_file, batch_size=128, shuffle=False, device=device)
 
