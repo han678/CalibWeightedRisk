@@ -190,7 +190,6 @@ def check_rc_plot(args):
     loss_type = args.loss_type
     regularization_strength = args.regularization_strength
     loss, loss_name = get_loss_function_and_name(args, loss_type, score_function, input_is_softmax=False, regularization_strength=regularization_strength)
-    loss_name = args.loss_type if args.loss_type != "aurc" else args.loss_type + f"_{args.gamma}_rs{regularization_strength}_{args.weight_grad}"
     # Load logits
     train_file = f'{save_npz_path}/{args.arch}_{loss_name}_seed{args.seed}_train_logits.npz'
     test_file = f'{save_npz_path}/{args.arch}_{loss_name}_seed{args.seed}_test_logits.npz'
@@ -292,7 +291,7 @@ if __name__ == '__main__':
     for args.seed in seeds:
         for args.arch in archs:
             for args.dataset in datasets:
-                loss_types = ['aurc', 'ce', 'focal', 'inverse_focal', 'dual_focal', 'ece_kde'] 
+                loss_types = ['inverse_focal']  #  ['aurc', 'ce', 'focal', 'inverse_focal', 'dual_focal', 'ece_kde'] 
                 for args.loss_type in loss_types:
                     check_rc_plot(args)
                     # main(args)
