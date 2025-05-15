@@ -1,4 +1,3 @@
-import argparse
 import os
 import random
 import numpy as np
@@ -7,17 +6,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 
-from common import get_loss_function_and_name, get_model_names
+from common import get_loss_function_and_name, post_hoc_args
 from loss.aurc import get_score_function, zero_one_loss
-from loss.ece import ECELoss
-from loss.ece_kde import get_ece_kde
+from loss.ece import ECELoss, Ece
+from loss.ece_kde import get_bandwidth, get_ece_kde
 from posthoc.metacal import MetaCalCoverageAcc, MetaCalMisCoverage
 from posthoc.ts import TemperatureScale
 from utils import Logger
 from utils.aurc_estimators import get_em_AURC
-from utils.cwece import ClasswiseECELoss
-from utils.metrics import get_brier_score, get_ece_score
-from visualize.reliability_plots import reliability_plot
+from utils.metrics import get_brier_score
+
 
 # Utility function to load logits as a DataLoader
 def load_logits_as_dataloader(file_path, batch_size=64, shuffle=False, device='cpu'):
@@ -38,10 +36,10 @@ def load_logits_as_numpy(file_path):
 
 
 # Evaluate logits and compute metrics
-def evaluate_from_logits(train_loader, val_loader, device, score_func="NegEntropy", temp_scale=False, temp_criterion=nn.CrossEntropyLoss()):
-    all_probs, all_targets, all_confidences = [], [], []
+def evaluate_from_logits(train_loader, val_loader, device, score_func="MSP", temp_scale=False, temp_criterion=nn.CrossEntropyLoss()):
+    all_logits, all_probs, all_targets, all_confidences = [], [], [], []
     total_correct_1, total_correct_5 = 0, 0
-    score_func = get_score_function(score_func)
+    score_func = get_score_function(score_func, input_is_softmax=False)
     eps = 1e-9
 
     # Apply temperature scaling if enabled
@@ -52,44 +50,56 @@ def evaluate_from_logits(train_loader, val_loader, device, score_func="NegEntrop
     with torch.no_grad():
         for _, (logits, targets) in enumerate(val_loader):
             logits, targets = logits.to(device), targets.to(device)
-            probs = F.softmax(logits, dim=1) if not temp_scale else ts_model.predict_prob(logits)
+            logits = logits if not temp_scale else ts_model.temp_scale(logits)
+            probs = F.softmax(logits, dim=1) 
             probs = torch.clamp(probs, min=eps, max=1 - eps)
             confidence = score_func(logits)
             _, pred = probs.topk(5, 1, largest=True, sorted=True)
             correct = pred.eq(targets.view(targets.size(0), -1).expand_as(pred)).float()
             total_correct_1 += correct[:, :1].sum().item()
             total_correct_5 += correct[:, :5].sum().item()
+            all_logits.append(logits.cpu().numpy())
             all_probs.append(probs.cpu().numpy())
             all_targets.append(F.one_hot(targets, num_classes=probs.shape[1]).to(device).cpu().numpy())
             all_confidences.append(confidence.cpu().numpy())
 
     # Aggregate results
+    all_logits = np.vstack(all_logits)
     all_probs = np.vstack(all_probs)
     all_targets = np.vstack(all_targets)
     all_confidences = np.hstack(all_confidences)
     loss = zero_one_loss(all_probs, all_targets)
     top1_acc = 100. * total_correct_1 / len(val_loader.dataset)
     top5_acc = 100. * total_correct_5 / len(val_loader.dataset)
-    get_cwece = ClasswiseECELoss(n_bins=15)
+    # get_cwece = ClasswiseECELoss(n_bins=15)
+    ece = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=False, classwise=False, is_input_softmax=False)
+    ece_adaptive = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=True, classwise=False, is_input_softmax=False)
+    cwece = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=False, classwise=True, is_input_softmax=False)
+    cwece_adaptive = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=True, classwise=True, is_input_softmax=False)
+    cwece_adaptive.set_bins(torch.from_numpy(all_confidences))
+    ece_adaptive.set_bins(torch.from_numpy(all_confidences))
     # Compute additional metrics
+
     bandwidth = 0.02
+    # bandwidth = get_bandwidth(all_probs, device='cpu')
     result = {
         "acc_1": top1_acc,
         "acc_5": top5_acc,
-        "l1_ce": get_ece_kde(all_probs, all_targets, bandwidth=bandwidth, p=1, mc_type='canonical', device='cpu'),
-        "l2_ce": get_ece_kde(all_probs, all_targets, bandwidth=bandwidth, p=2, mc_type='canonical', device='cpu'),
-        "brier_score": get_brier_score(all_probs, all_targets),
-        "ece": get_ece_score(all_probs, all_targets, n_bins=15),
-        "cwece": get_cwece(torch.from_numpy(all_probs), torch.from_numpy(all_targets)),
+        "l1_ce": get_ece_kde(all_probs, all_targets, bandwidth=bandwidth, p=1, mc_type='canonical', device='cpu') * 100.0,
+        "l2_ce": get_ece_kde(all_probs, all_targets, bandwidth=bandwidth, p=2, mc_type='canonical', device='cpu') * 100.0,
+        "brier_score": get_brier_score(all_probs, all_targets).item() * 100.0,
+        "ece": ece(logits=torch.from_numpy(all_logits), labels=torch.from_numpy(all_targets)).item() * 100.0,
+        "ece_a":  ece_adaptive(logits=torch.from_numpy(all_logits), labels=torch.from_numpy(all_targets)).item() * 100.0,
+        "cwece": cwece(logits=torch.from_numpy(all_logits), labels=torch.from_numpy(all_targets)) * 100.0,
+        "cwece_a": cwece_adaptive(logits=torch.from_numpy(all_logits), labels=torch.from_numpy(all_targets)) * 100.0,
         "aurc": get_em_AURC(residuals=loss, confidence=all_confidences),
         "temp": round(ts_model.temp.item(), 4) if temp_scale else None
     }
     return result
 
-
 # Evaluate MetaCal methods
-def evalute_meta_cal(X1, Y1, X2, Y2, score_func="NegEntropy", method="miscoverage", acc=0.85, alpha=0.05):
-    score_func = get_score_function(score_func)
+def evaluate_meta_cal(X1, Y1, X2, Y2, score_func="MSP", method="miscoverage", acc=0.85, alpha=0.05):
+    score_func = get_score_function(score_func, input_is_softmax=True)
     eps = 1e-9
 
     # Choose MetaCal method
@@ -110,132 +120,73 @@ def evalute_meta_cal(X1, Y1, X2, Y2, score_func="NegEntropy", method="miscoverag
     top1_acc = 100. * total_correct_1 / len(Y2)
     top5_acc = 100. * total_correct_5 / len(Y2)
     
-    get_cwece = ClasswiseECELoss(n_bins=15)
     # Compute additional metrics
-    confidence = score_func(torch.from_numpy(X2)).detach().cpu().numpy()
+    confidence = score_func(torch.from_numpy(probs)).detach().cpu().numpy()
     bandwidth = 0.02
+    # bandwidth = get_bandwidth(probs, device='cpu')
     Y2_onehot = np.eye(probs.shape[1])[Y2]
     loss = zero_one_loss(probs, Y2_onehot)
+    ece2 = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=False, classwise=False, is_input_softmax=True)
+    ece_adaptive = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=True, classwise=False, is_input_softmax=True)
+    cwece = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=False, classwise=True, is_input_softmax=True)
+    cwece_adaptive = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=True, classwise=True, is_input_softmax=True)
+    cwece_adaptive.set_bins(torch.from_numpy(confidence))
+    ece_adaptive.set_bins(torch.from_numpy(confidence))
     result = {
         "acc_1": top1_acc,
         "acc_5": top5_acc,
-        "l1_ce": get_ece_kde(probs, Y2_onehot, bandwidth=bandwidth, p=1, mc_type='canonical', device='cpu'),
-        "l2_ce": get_ece_kde(probs, Y2_onehot, bandwidth=bandwidth, p=2, mc_type='canonical', device='cpu'),
-        "brier_score": get_brier_score(probs, Y2_onehot),
-        "ece": get_ece_score(probs, Y2_onehot, n_bins=15),
-        "cwece": get_cwece(torch.from_numpy(probs), torch.from_numpy(Y2_onehot)),
+        "l1_ce": get_ece_kde(probs, Y2_onehot, bandwidth=bandwidth, p=1, mc_type='canonical', device='cpu') * 100.0,
+        "l2_ce": get_ece_kde(probs, Y2_onehot, bandwidth=bandwidth, p=2, mc_type='canonical', device='cpu') * 100.0,
+        "brier_score": get_brier_score(probs, Y2_onehot).item() * 100.0,
+        "ece": ece2(logits=torch.from_numpy(probs), labels=torch.from_numpy(Y2_onehot)).item()* 100.0,
+        "ece_a": ece_adaptive(logits=torch.from_numpy(probs), labels=torch.from_numpy(Y2_onehot)).item() * 100.0,
+        "cwece": cwece(logits=torch.from_numpy(probs), labels=torch.from_numpy(Y2_onehot)) * 100.0,
+        "cwece_a": cwece_adaptive(logits=torch.from_numpy(probs), labels=torch.from_numpy(Y2_onehot))* 100.0,
         "aurc": get_em_AURC(residuals=loss, confidence=confidence),
         "temp": None
     }
     return result
 
 
-# Parse command-line arguments
-def post_hoc_args():
-    model_names = get_model_names()
-    parser = argparse.ArgumentParser(description='Post-hoc calibration')
-    parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet50', choices=model_names,
-                        help='Model architecture: ' + ' | '.join(model_names) + ' (default: resnet50)')
-    parser.add_argument('-d', '--dataset', default='cifar10', choices=['cifar10', 'svhn', 'cifar100', 'tiny-imagenet'])
-    parser.add_argument('-j', '--workers', default=8, type=int)
-    parser.add_argument('--loss_type', default='focal', type=str,
-                        choices=['ce', 'aurc', "sele", "ece", "focal", "inverse_focal", "label_smoothing", "dual_focal", "ece_kde"])
-    parser.add_argument('--score_function', default="NegEntropy", type=str)
-    parser.add_argument('--seed', default=25, type=int)
-    parser.add_argument('--gamma', default=0.5, type=float, help='Gamma parameter for AURC loss')
-    parser.add_argument('--weight_grad', default=True, type=bool, help='Whether to consider weight gradient for AURC loss')
-    parser.add_argument('--regularization_strength', default=0.05, type=float, help='Regularization strength for AURC loss')
-    parser.add_argument('--train_batch', default=128, type=int, help='Batch size for training')
-    parser.add_argument('--test_batch', default=128, type=int, help='Batch size for testing')
-    return parser.parse_args()
-
-
-def plot_reliability_curve(test_loader, device, save_fig=None):
-    all_probs, all_targets, all_confidences = [], [], []
-
-    with torch.no_grad():
-        for _, (logits, targets) in enumerate(test_loader):
-            logits, targets = logits.to(device), targets.to(device)
-            probs = F.softmax(logits, dim=1)  # Compute softmax probabilities
-            confidence = torch.max(probs, dim=1).values  # Use max softmax probability as confidence
-            all_probs.append(probs.cpu().numpy())
-            all_targets.append(F.one_hot(targets, num_classes=probs.shape[1]).to(device).cpu().numpy())
-            all_confidences.append(confidence.cpu().numpy())
-
-    all_probs = np.vstack(all_probs)
-    all_targets = np.vstack(all_targets)
-    all_confidences = np.hstack(all_confidences)
-
-    true_labels = np.argmax(all_targets, axis=1)
-    predicted_labels = np.argmax(all_probs, axis=1)
-
-    reliability_plot(all_confidences, predicted_labels, true_labels, save_fig=save_fig)
-
-def check_rc_plot(args):
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-
-    print('==> Preparing dataset %s' % args.dataset)
-    root = "result/post_hoc/"
-    output_path = root + args.dataset + "/seed" + str(args.seed)
-    if not os.path.isdir(output_path):
-        os.makedirs(output_path, exist_ok=True)
-
-    save_npz_path = "result/train/" + args.dataset
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    # Evaluate metrics
-    score_function = args.score_function
-    loss_type = args.loss_type
-    regularization_strength = args.regularization_strength
-    loss, loss_name = get_loss_function_and_name(args, loss_type, score_function, input_is_softmax=False, regularization_strength=regularization_strength)
-    # Load logits
-    train_file = f'{save_npz_path}/{args.arch}_{args.loss_type}_seed{args.seed}_train_logits.npz'
-    test_file = f'{save_npz_path}/{args.arch}_{args.loss_type}_seed{args.seed}_test_logits.npz'
-    test_loader = load_logits_as_dataloader(test_file, batch_size=128, shuffle=False, device=device)
-
-    # Plot reliability curve
-    fig_name = os.path.join(output_path, f'{args.arch}_{args.loss_type}_seed{args.seed}_rc.png')
-    plot_reliability_curve(test_loader, device, save_fig=fig_name)
-
-# Main function
 def main(args):
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
     print('==> Preparing dataset %s' % args.dataset)
-    root = "result/post_hoc/"
-    output_path = root + args.dataset + "/seed" + str(args.seed)
+    root = f"train_output_ph/{args.dataset}/" 
+    fig_root = f"finetune_rc/{args.dataset}/"
+    fig_output_path = fig_root + "seed" + str(args.seed) if args.loss_type != "aurc" else fig_root + "/" + args.score_function + "seed" + str(args.seed)
+    output_path = root + "/seed" + str(args.seed) if args.loss_type != "aurc" else root + args.score_function + "seed" + str(args.seed)
     if not os.path.isdir(output_path):
         os.makedirs(output_path, exist_ok=True)
+        os.makedirs(fig_output_path, exist_ok=True)
 
-    save_npz_path = "result/train/" + args.dataset
+    save_npz_path = f"train_output/npz/{args.dataset}/{args.score_function}/" if args.loss_type == "aurc" else f"finetune/npz/{args.dataset}/"
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # Evaluate metrics
     score_function = args.score_function
     loss_type = args.loss_type
     regularization_strength = args.regularization_strength
-    loss, loss_name = get_loss_function_and_name(args, loss_type, score_function, input_is_softmax=False, regularization_strength=regularization_strength)
+    loss, _ = get_loss_function_and_name(args, loss_type, score_function, input_is_softmax=False, regularization_strength=regularization_strength)
+    file_path = os.path.join(output_path, f'{args.arch}_{loss_type}.txt') if args.loss_type != "aurc" else os.path.join(output_path, f'{args.arch}_{loss_type}_rs{regularization_strength}.txt')
     # Load logits
-    train_file = f'{save_npz_path}/{args.arch}_{args.loss_type}_seed{args.seed}_train_logits.npz'
-    test_file = f'{save_npz_path}/{args.arch}_{args.loss_type}_seed{args.seed}_test_logits.npz'
+    loss_name = args.loss_type if args.loss_type != "aurc" else args.loss_type + f"_{args.gamma}_rs{regularization_strength}"
+    train_file = f'{save_npz_path}{args.arch}_{loss_name}_best_seed{args.seed}_train_logits.npz'
+    test_file = f'{save_npz_path}{args.arch}_{loss_name}_best_seed{args.seed}_test_logits.npz'
+    if not os.path.isfile(train_file) or not os.path.isfile(test_file):
+        raise FileNotFoundError(f"Logits files not found: {train_file} or {test_file}")
     train_loader = load_logits_as_dataloader(train_file, batch_size=128, shuffle=False, device=device)
     test_loader = load_logits_as_dataloader(test_file, batch_size=128, shuffle=False, device=device)
 
-    # Plot reliability curve
-    fig_name = os.path.join(output_path, f'{args.arch}_{args.loss_type}_seed{args.seed}_rc.png')
-    plot_reliability_curve(test_loader, device, save_fig=fig_name)
-
-    results = evaluate_from_logits(train_loader, test_loader, device, score_func=score_function, temp_scale=False, temp_criterion=loss)
+    results = evaluate_from_logits(train_loader, test_loader, device, score_func="MSP", temp_scale=False, temp_criterion=loss)
 
     # Log results
     title = f"{args.dataset}-{loss_name}-{args.arch}"
-    logger = Logger(os.path.join(output_path, f'{args.arch}_{loss_type}.txt'), title=title)
+    logger = Logger(file_path, title=title)
     add_names = ["Val Acc1", "Val Acc5"] if args.dataset in ['cifar100', 'imagenet'] else ["Val Acc"]
-    logger.set_names(['Method'] + add_names + ["l1 CE", "l2 CE", 'Brier Score', "ece", "cwece", 'AURC', "temp"])
+    logger.set_names(['Method'] + add_names + ["l1CE", "l2CE", 'Brier', "ece", "ece_a", "cwece", "cwece_a", 'AURC', "temp"])
     model_info = (
         list(results.values())
         if args.dataset in ['cifar100', 'imagenet']
@@ -245,7 +196,7 @@ def main(args):
 
     # Temperature scaling
     ece_loss = ECELoss(n_bins=15, p=1)
-    results_ls = evaluate_from_logits(train_loader, test_loader, device, temp_scale=True, score_func=score_function, temp_criterion=ece_loss)
+    results_ls = evaluate_from_logits(train_loader, test_loader, device, temp_scale=True, score_func="MSP", temp_criterion=ece_loss)
     add_ls_res = list(results_ls.values()) if args.dataset in ['cifar100', 'imagenet'] else list(
         results_ls.values())[:1] + list(results_ls.values())[2:]
     logger.append(["ts"] + add_ls_res)
@@ -255,9 +206,9 @@ def main(args):
     X2, Y2 = load_logits_as_numpy(test_file)
     acc = 0.97 if args.dataset == 'cifar10' else 0.87 if args.dataset == 'cifar100' else 0.85
 
-    # # Meta-cal miscoverage
+    # Meta-cal miscoverage
     try:
-        results_miscov = evalute_meta_cal(X1, Y1, X2, Y2, score_func=score_function, method="miscoverage", alpha=0.05)
+        results_miscov = evaluate_meta_cal(X1, Y1, X2, Y2, score_func="MSP", method="miscoverage", alpha=0.05)
         add_miscov_res = list(results_miscov.values()) if args.dataset in ['cifar100', 'imagenet'] else list(
             results_miscov.values())[:1] + list(results_miscov.values())[2:]
         logger.append(["MetaCalMisCoverage"] + add_miscov_res)
@@ -265,32 +216,34 @@ def main(args):
         print(f"An error occurred during meta-calibration miscoverage evaluation: {e}")
 
     # Meta-cal accuracy
-    try:
-        results_acc = evalute_meta_cal(X1, Y1, X2, Y2, score_func=score_function, method="coverageacc", acc=acc)
-        add_acc_res = list(results_acc.values()) if args.dataset in ['cifar100', 'imagenet'] else list(
-            results_acc.values())[:1] + list(results_acc.values())[2:]
-        logger.append(["MetaCalCoverageAcc"] + add_acc_res)
-    except Exception as e:
-        print(f"An error occurred during meta-calibration accuracy evaluation: {e}")
+    while acc <= 1.0:
+        try:
+            results_miscov = evaluate_meta_cal(X1, Y1, X2, Y2, score_func="MSP", method="coverageacc", acc=acc)
+            add_miscov_res = list(results_miscov.values()) if args.dataset in ['cifar100', 'imagenet'] else list(
+                results_miscov.values())[:1] + list(results_miscov.values())[2:]
+            logger.append(["MetaCalCoverageAcc"] + add_miscov_res)
+            break  # Exit the loop if successful
+        except Exception as e:
+            print(f"An error occurred during meta-calibration coverage accuracy evaluation: {e}")
+            acc += 0.005  # Increment the accuracy threshold
+            print(f"Increasing acc to {acc} and retrying...")
 
     logger.close()
-
 
 if __name__ == '__main__':
     # Define arguments
     args = post_hoc_args()
-
-    # Seeds, architectures, loss types, and datasets
-    seeds = [40] # , 41, 42, 25, 52
-    archs = ['resnet50']
-    
-    datasets = ['cifar10']
-    args.gamma = 0.5
-    # Iterate over all combinations
-    for args.seed in seeds:
-        for args.arch in archs:
-            for args.dataset in datasets:
-                loss_types = ['inverse_focal']  #  ['aurc', 'ce', 'focal', 'inverse_focal', 'dual_focal', 'ece_kde'] 
-                for args.loss_type in loss_types:
-                    check_rc_plot(args)
-                    # main(args)
+    if args.dataset == 'tiny-imagenet':
+        args.regularization_strength = 0.05
+    elif args.dataset == 'cifar100':
+        args.regularization_strength = 0.01
+    elif args.dataset == 'cifar10':
+        args.regularization_strength = 0.05
+    else:
+        pass
+    if args.loss_type == "aurc":
+        for args.score_function in ["MSP", "NegEntropy", "SoftmaxMargin"]:
+            main(args)
+    else:
+        args.score_function = "MSP"
+        main(args)
