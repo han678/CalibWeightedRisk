@@ -5,6 +5,7 @@ import os
 import torch.backends.cudnn as cudnn, torch.nn as nn
 
 from common import common_args, get_loss_function_and_name
+from loss.ece import Ece
 from models.utils import get_network
 from utils import Logger
 import torch
@@ -14,7 +15,7 @@ from loss.ece_kde import get_ece_kde
 from utils.aurc_estimators import get_em_AURC
 from utils.loaders import prepare_dataset
 from loss.aurc import cross_entropy_loss, get_score_function
-from utils.metrics import get_brier_score, get_ece_score
+from utils.metrics import get_brier_score
 from posthoc.ts import ModelWithTemperature
 
 def train(net, train_loader, criterion, optimizer):
@@ -50,9 +51,9 @@ def train(net, train_loader, criterion, optimizer):
     return avg_loss, top1_acc, top5_acc
 
 
-def evaluate(model, val_loader, score_func="NegEntropy", temp_scale=False, temp_criterion=nn.CrossEntropyLoss()):
+def evaluate(model, val_loader, score_func="MSP", temp_scale=False, temp_criterion=nn.CrossEntropyLoss()):
     model.eval()
-    all_probs, all_targets, all_confidences = [], [], []
+    all_probs, all_logits, all_targets, all_confidences = [], [], [], []
     total_correct_1 = 0
     total_correct_5 = 0
     device = next(model.parameters()).device
@@ -72,24 +73,41 @@ def evaluate(model, val_loader, score_func="NegEntropy", temp_scale=False, temp_
             correct = pred.eq(targets.view(targets.size(0), -1).expand_as(pred)).float()
             total_correct_1 += correct[:, :1].sum().item()
             total_correct_5 += correct[:, :5].sum().item()
+
+            all_logits.append(logits.cpu().numpy())
             all_probs.append(probs.cpu().numpy())
             all_targets.append(F.one_hot(targets, num_classes=probs.shape[1]).to(device).cpu().numpy())
             all_confidences.append(confidence.cpu().numpy())
+    all_logits = np.vstack(all_logits)
     all_probs = np.vstack(all_probs)
     all_targets = np.vstack(all_targets)
     all_confidences = np.hstack(all_confidences)
     loss = cross_entropy_loss(all_probs, all_targets)
     top1_acc = 100. * total_correct_1 / len(val_loader.dataset)
     top5_acc = 100. * total_correct_5 / len(val_loader.dataset)
-    brier_score = get_brier_score(all_probs, all_targets)
-    result = {"acc_1": top1_acc, "acc_5": top5_acc}
-    bandwidth = 0.02
-    result['l1_ce'] = get_ece_kde(all_probs, all_targets, bandwidth=bandwidth, p=1, mc_type='canonical', device='cpu')
-    result['l2_ce'] = get_ece_kde(all_probs, all_targets, bandwidth=bandwidth, p=2, mc_type='canonical', device='cpu')
-    result["brier_score"] = brier_score
-    result['ece'] = get_ece_score(all_probs, all_targets, n_bins=15)
-    result["aurc"] = get_em_AURC(residuals=loss, confidence=all_confidences)
+
+    ece = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=False, classwise=False, is_input_softmax=False)
+    ece_adaptive = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=True, classwise=False, is_input_softmax=False)
+    cwece = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=False, classwise=True, is_input_softmax=False)
+    cwece_adaptive = Ece(p=1, n_bins=15, version="not-our", adaptive_bins=True, classwise=True, is_input_softmax=False)
+    cwece_adaptive.set_bins(torch.from_numpy(all_confidences))
+    ece_adaptive.set_bins(torch.from_numpy(all_confidences))
+
+    bandwidth = 0.02 #get_bandwidth(all_probs, device='cpu')
+    result = {
+        "acc_1": top1_acc,
+        "acc_5": top5_acc,
+        "l1_ce": get_ece_kde(all_probs, all_targets, bandwidth=bandwidth, p=1, mc_type='canonical', device='cpu') * 100.0,
+        "l2_ce": get_ece_kde(all_probs, all_targets, bandwidth=bandwidth, p=2, mc_type='canonical', device='cpu') * 100.0,
+        "brier_score": get_brier_score(all_probs, all_targets) * 100.0,
+        "ece": ece(logits=torch.from_numpy(all_logits), labels=torch.from_numpy(all_targets)).item() * 100.0,
+        "ece_a":  ece_adaptive(logits=torch.from_numpy(all_logits), labels=torch.from_numpy(all_targets)).item() * 100.0,
+        "cwece": cwece(logits=torch.from_numpy(all_logits), labels=torch.from_numpy(all_targets)) * 100.0,
+        "cwece_a": cwece_adaptive(logits=torch.from_numpy(all_logits), labels=torch.from_numpy(all_targets)) * 100.0,
+        "aurc": get_em_AURC(residuals=loss, confidence=all_confidences),
+    }
     return result
+
 
 def export_logits(model, data_loader, save_name, device):
     model.eval()
@@ -117,13 +135,24 @@ def main(args):
     test_loader = prepare_dataset(
         args.dataset, args.train_batch, False, args.workers, args.data_dir
     )
-    root = "result/finetune/" if args.load_pretrain else "result/train/"
-    save_model_path = "result/models/" + args.dataset
-    save_npz_path = root + args.dataset
-    output_path = root + args.dataset + "/seed" + str(args.seed) + args.score_function
+    root = "train_output/"
+    if args.loss_type == "aurc" and args.weight_grad == False:
+        save_model_path = root + f"models/{args.dataset}/{args.score_function}{str(args.weight_grad)}"
+        save_npz_path = root + f"npz/{args.dataset}/{args.score_function}{str(args.weight_grad)}/"
+        output_path = root + args.dataset + "/seed" + str(args.seed) + args.score_function + str(args.weight_grad)
+    elif args.loss_type == "aurc" and args.weight_grad == True:
+        save_model_path = root + f"models/{args.dataset}/{args.score_function}"
+        save_npz_path = root + f"npz/{args.dataset}/{args.score_function}/"
+        output_path = root + args.dataset + "/seed" + str(args.seed) + args.score_function 
+    else:
+        save_model_path = root + f"models/{args.dataset}/"
+        save_npz_path = root + f"npz/{args.dataset}/"
+        output_path = root + args.dataset + "/seed" + str(args.seed)
     if not os.path.isdir(output_path):
         os.makedirs(output_path, exist_ok=True)
         os.makedirs(save_model_path, exist_ok=True)
+        os.makedirs(save_npz_path, exist_ok=True)
+
     if args.dataset != "tiny-imagenet":
         model = get_network(args)
         if torch.cuda.is_available():
@@ -133,6 +162,9 @@ def main(args):
             print("==> Load pretrained model '%s'" % args.arch)
             model_path = args.model_dir + "/" + args.dataset + "/" + args.arch + f"_seed25.pth"
             model.load_state_dict(torch.load(model_path))
+            if torch.cuda.is_available():
+                model = torch.nn.DataParallel(model.cuda())
+                cudnn.benchmark = True
         else:
             print("==> Randomly initialize the model")
     else:
@@ -144,7 +176,7 @@ def main(args):
     loss_type = args.loss_type
     regularization_strength = args.regularization_strength
     loss, loss_name = get_loss_function_and_name(args, loss_type, score_function, input_is_softmax=False, regularization_strength=regularization_strength)
-    results = evaluate(model, test_loader, score_func=score_function)
+    results = evaluate(model, test_loader, score_func="MSP")
     optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), args.lr,
                                 momentum=args.momentum, weight_decay=args.weight_decay, nesterov=False)
     if args.dataset == 'tiny-imagenet':
@@ -154,33 +186,38 @@ def main(args):
 
     title = f"{args.dataset}-{loss_type}-{args.arch}"
     # set up the output format
-    loss_name = args.loss_type if args.loss_type != "aurc" else args.loss_type + f"_{args.gamma}_rs{regularization_strength}_{args.weight_grad}"
+    loss_name = args.loss_type if args.loss_type != "aurc" else args.loss_type + f"_{args.gamma}_rs{regularization_strength}"
     logger = Logger(os.path.join(output_path, f'{args.arch}_{loss_name}.txt'), title=title)
     add_names = ["Train Acc1", "Train Acc5", "Val Acc1", "Val Acc5"] if args.dataset in ['cifar100', 'imagenet'] else ['Train Acc', "Val Acc"]
-    logger.set_names(['Epoch', 'Train Loss'] + add_names + ["l1 CE", "l2 CE", 'Brier Score', "ece", 'AURC'])
+    logger.set_names(['Epoch', 'Train Loss'] + add_names + ["l1CE", "l2CE", 'Brier', "ece", "ece_a", "cwece", "cwece_a", 'AURC'])
     model_info = [0, None, None, None] + list(results.values()) if args.dataset in ['cifar100', 'imagenet'] else [0,None,None] + list(
         results.values())[:1] + list(results.values())[2:]
-    # logger_post_hoc = Logger(os.path.join(output_path, f'{args.arch}_{loss_type}_ts.txt'), title=title)
-    # logger_post_hoc.set_names(['Method', 'Train Loss'] + add_names + ["l1 CE", "l2 CE", 'Brier Score', "ece", 'AURC'])
     logger.append(model_info)
+    export_logits(model, train_loader, f'{save_npz_path}/{args.arch}_init_seed{args.seed}_train_logits', device)
+    export_logits(model, test_loader, f'{save_npz_path}/{args.arch}_init_seed{args.seed}_test_logits', device)
+    # Initialize best ECE
+    best_ece = float('inf')
+    best_model_path = f"{save_model_path}/{args.arch}_{loss_name}_best_seed{args.seed}.pth"
     # start training
     for epoch in range(1, args.epochs + 1):
         train_loss, train_acc_1, train_acc_5 = train(model, train_loader, loss, optimizer)
         print("lr: ", optimizer.param_groups[0]['lr'])
         lr_scheduler.step()
-        results = evaluate(model, test_loader, score_func=score_function)
+        results = evaluate(model, test_loader, score_func="MSP")
         add_res = [train_acc_5] + list(results.values()) if args.dataset in ['cifar100', 'imagenet'] else list(
             results.values())[:1] + list(results.values())[2:]  # remove the top 5 accuracy
         logger.append([int(epoch), train_loss, train_acc_1] + add_res)
-        if epoch == args.epochs:
-            export_logits(model, train_loader, f'{save_npz_path}/{args.arch}_{loss_name}_seed{args.seed}_train_logits', device)
-            export_logits(model, test_loader, f'{save_npz_path}/{args.arch}_{loss_name}_seed{args.seed}_test_logits', device)
-        # if epoch % 40 == 0: 
-        #     export_logits(model, train_loader, f'{save_npz_path}/{args.arch}_{loss_name}_seed{args.seed}_train_logits_epoch{epoch}', device)
-        #     export_logits(model, test_loader, f'{save_npz_path}/{args.arch}_{loss_name}_seed{args.seed}_test_logits_epoch{epoch}', device)
-    # torch.save(model.state_dict(),  f"{save_model_path}/{args.arch}_{args.loss_type}_seed{args.seed}.pth")
+        current_ece = results["ece"]
+        min_epoch = 120
+        acc_threshold = 88.0 if args.dataset == "cifar10" else 60.0 if args.dataset == "cifar100" else 74.0
+        if current_ece < best_ece and epoch >= min_epoch and train_acc_5 > acc_threshold:
+            best_ece = current_ece
+            torch.save(model.state_dict(), best_model_path)
+            export_logits(model, train_loader, f'{save_npz_path}/{args.arch}_{loss_name}_best_seed{args.seed}_train_logits', device)
+            export_logits(model, test_loader, f'{save_npz_path}/{args.arch}_{loss_name}_best_seed{args.seed}_test_logits', device)
+            print(f"Epoch {epoch}: New best ECE {best_ece:.4f}. Model saved to {best_model_path}.")
+    
     logger.close()
-    # logger_post_hoc.close()
 
 
 if __name__ == '__main__':
