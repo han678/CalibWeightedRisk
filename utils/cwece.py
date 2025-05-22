@@ -36,5 +36,5 @@ class ClasswiseECELoss(nn.Module):
             else:
                 per_class_sce = torch.cat((per_class_sce, class_sce), dim=0)
 
-        sce = torch.sum(per_class_sce).item()
+        sce = torch.mean(per_class_sce).item()
         return sce

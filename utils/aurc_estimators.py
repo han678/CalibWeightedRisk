@@ -2,9 +2,9 @@ from __future__ import print_function, absolute_import
 
 import numpy as np
 
-from loss.aurc import compute_harmonic_alphas, sele_alphas, compute_ln_alphas
+from loss.aurc import compute_harmonic_alphas, compute_ln_alphas
 
-__all__ = ["get_AURC", "get_em_AURC", "get_sele_score", "get_ln_AURC"]
+__all__ = ["get_AURC", "get_em_AURC", "get_ln_AURC"]
 
 def get_AURC(residuals, confidence):
     '''
@@ -56,22 +56,3 @@ def get_ln_AURC(residuals, confidence):
     alphas = compute_ln_alphas(n=m)
     ln_AURC = sum(np.array(temp1) * alphas / m)
     return ln_AURC
-
-def get_sele_score(residuals, confidence):
-    '''
-    Compute the SELE score
-
-    Args:
-        residuals (list): The residuals of the model predictions.
-        confidence (list): The confidence of the model predictions.
-
-    Returns:
-        float: The SELE score.      
-    '''
-
-    m = len(residuals)
-    idx_sorted = np.argsort(confidence)
-    temp1 = residuals[idx_sorted]
-    alphas = sele_alphas(n=m)
-    score = sum(np.array(temp1) * alphas / m)
-    return score
