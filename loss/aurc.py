@@ -35,12 +35,6 @@ def compute_harmonic_alphas(n, use_diagamma=True):
     else:
         return np.cumsum(1 / (n - np.arange(n)))
 
-
-def sele_alphas(n):
-    """Compute selection-based alphas."""
-    return [1 * (rank / n) for rank in range(1, n + 1)]
-
-
 # Utility functions for scoring
 def entropy(x):
     """Compute entropy of input tensor."""
@@ -59,12 +53,6 @@ def top12_margin(x):
     values, _ = torch.topk(x, k=2, dim=-1)
     return values[:, 0] - values[:, 1] if x.ndim > 1 else values[0] - values[1]
 
-
-def gini_score(x):
-    """Compute Gini score."""
-    return 1 - torch.norm(x, dim=1, p=2) ** 2
-
-
 def get_score_function(name: str, input_is_softmax: bool = False):
     """Retrieve the appropriate scoring function."""
     eps = 1e-9
@@ -75,9 +63,6 @@ def get_score_function(name: str, input_is_softmax: bool = False):
         "MSP": lambda x: torch.max(as_probs(x), dim=1).values,
         "NegEntropy": lambda x: -entropy(as_logits(x)),
         "SoftmaxMargin": lambda x: top12_margin(as_probs(x)),
-        "MaxLogit": lambda x: torch.max(as_logits(x), dim=1).values,
-        "l2_norm": lambda x: torch.norm(as_probs(x), dim=1, p=2),
-        "NegGiniScore": lambda x: -gini_score(as_probs(x)),
     }
 
     if name not in mapping:
@@ -86,8 +71,8 @@ def get_score_function(name: str, input_is_softmax: bool = False):
 
 
 class BaseAURCLoss(_Loss):
-    def __init__(self, score_function="MSP", gamma=0.3, batch_size=128, reduction='sum',
-                 regularization_strength=0.02, alpha_fn=None, weight_grad=True, input_is_softmax=False):
+    def __init__(self, score_function="MSP", gamma=0.5, batch_size=128, reduction='sum',
+                 regularization_strength=0.05, alpha_fn=None, weight_grad=True, input_is_softmax=False):
         super().__init__(reduction=reduction)
         self.gamma = gamma
         self.batch_size = batch_size
@@ -97,7 +82,6 @@ class BaseAURCLoss(_Loss):
         self.score_func = get_score_function(score_function, self.input_is_softmax)
         self.alphas = alpha_fn(batch_size) if alpha_fn else None
         self.eps = 1e-9  # small value for clamping
-        # Choose loss function
         if self.input_is_softmax:
             self.criterion = torch.nn.NLLLoss(reduction='none')
         else:
@@ -151,11 +135,3 @@ class AURCLoss(BaseAURCLoss):
                          regularization_strength=regularization_strength, alpha_fn=compute_harmonic_alphas,
                          weight_grad=weight_grad, input_is_softmax=input_is_softmax)
 
-
-# Selection-based loss class
-class SeleLoss(BaseAURCLoss):
-    def __init__(self, gamma=0.3, batch_size=128, score_function="MSP", reduction='sum',
-                 regularization_strength=0.02, weight_grad=True, input_is_softmax=False):
-        super().__init__(gamma=gamma, batch_size=batch_size, score_function=score_function, reduction=reduction,
-                         regularization_strength=regularization_strength, alpha_fn=sele_alphas,
-                         weight_grad=weight_grad, input_is_softmax=input_is_softmax)
