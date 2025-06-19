@@ -20,13 +20,14 @@ To run the code, you will need the following dependencies (excluding common pack
 
 #### Using the AURC loss in your project
 
-To evaluate AURC using our estimator, you can copy the file `loss/aurc.py` into your repository. 
+To train the model with regularized AURC loss, you can copy the file `loss/aurc.py` into your repository. 
 
 #### Visualizing the performance of AURC loss
 
-To train the model with AURC loss, use the following commands:
+To train the model with regularized AURC loss, use the following commands:
 ```bash
-python train.py
+cd src
+python main.py
 ```
 
 #### Reference
