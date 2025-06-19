@@ -1,4 +1,5 @@
-This repository contains the code for the paper **"A Novel Characterization of the Population Area Under the Risk Coverage Curve (AURC) and Rates of Finite Sample Estimators"** [[arxiv](https://arxiv.org/pdf/2505.23463)].
+This repository contains the code for the paper **"Revisiting Reweighted Risk for Calibration: AURC, Focal Loss, 
+and Inverse Focal Loss"** [[arxiv](https://arxiv.org/pdf/2505.23463)].
 
 #### Key Dependencies
 To run the code, you will need the following dependencies (excluding common packages like `scipy`, `numpy`, and `torch`):
