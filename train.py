@@ -132,7 +132,7 @@ def main(args):
     train_loader = prepare_dataset(
         args.dataset, args.train_batch, True, args.workers, args.data_dir
     )
-    test_loader = prepare_dataset(
+    val_loader = prepare_dataset(
         args.dataset, args.train_batch, False, args.workers, args.data_dir
     )
     root = "train_output/"
@@ -176,7 +176,7 @@ def main(args):
     loss_type = args.loss_type
     regularization_strength = args.regularization_strength
     loss, loss_name = get_loss_function_and_name(args, loss_type, score_function, input_is_softmax=False, regularization_strength=regularization_strength)
-    results = evaluate(model, test_loader, score_func="MSP")
+    results = evaluate(model, val_loader, score_func="MSP")
     optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), args.lr,
                                 momentum=args.momentum, weight_decay=args.weight_decay, nesterov=False)
     if args.dataset == 'tiny-imagenet':
@@ -194,7 +194,7 @@ def main(args):
         results.values())[:1] + list(results.values())[2:]
     logger.append(model_info)
     export_logits(model, train_loader, f'{save_npz_path}/{args.arch}_init_seed{args.seed}_train_logits', device)
-    export_logits(model, test_loader, f'{save_npz_path}/{args.arch}_init_seed{args.seed}_test_logits', device)
+    export_logits(model, val_loader, f'{save_npz_path}/{args.arch}_init_seed{args.seed}_val_logits', device)
     # Initialize best ECE
     best_ece = float('inf')
     best_model_path = f"{save_model_path}/{args.arch}_{loss_name}_best_seed{args.seed}.pth"
@@ -203,7 +203,7 @@ def main(args):
         train_loss, train_acc_1, train_acc_5 = train(model, train_loader, loss, optimizer)
         print("lr: ", optimizer.param_groups[0]['lr'])
         lr_scheduler.step()
-        results = evaluate(model, test_loader, score_func="MSP")
+        results = evaluate(model, val_loader, score_func="MSP")
         add_res = [train_acc_5] + list(results.values()) if args.dataset in ['cifar100', 'imagenet'] else list(
             results.values())[:1] + list(results.values())[2:]  # remove the top 5 accuracy
         logger.append([int(epoch), train_loss, train_acc_1] + add_res)
@@ -214,7 +214,7 @@ def main(args):
             best_ece = current_ece
             torch.save(model.state_dict(), best_model_path)
             export_logits(model, train_loader, f'{save_npz_path}/{args.arch}_{loss_name}_best_seed{args.seed}_train_logits', device)
-            export_logits(model, test_loader, f'{save_npz_path}/{args.arch}_{loss_name}_best_seed{args.seed}_test_logits', device)
+            export_logits(model, val_loader, f'{save_npz_path}/{args.arch}_{loss_name}_best_seed{args.seed}_val_logits', device)
             print(f"Epoch {epoch}: New best ECE {best_ece:.4f}. Model saved to {best_model_path}.")
     
     logger.close()
