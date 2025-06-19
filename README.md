@@ -22,7 +22,7 @@ To run the code, you will need the following dependencies (excluding common pack
 
 To train the model with regularized AURC loss, you can copy the file `loss/aurc.py` into your repository. 
 
-#### Visualizing the performance of AURC loss
+#### Train the model with AURC loss
 
 To train the model with regularized AURC loss, use the following commands:
 ```bash
