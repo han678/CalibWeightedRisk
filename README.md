@@ -17,7 +17,6 @@ To run the code, you will need the following dependencies (excluding common pack
 - **Tiny-ImageNet**
   - download and preprocess the dataset from [[link](https://github.com/tjmoon0104/pytorch-tiny-imagenet)]  
 - **CIFAR-10/100**
-  -  Place the downloaded files in the `data` folder.
 
 #### Using the AURC loss in your project
 
