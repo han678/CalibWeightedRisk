@@ -15,7 +15,7 @@ To run the code, you will need the following dependencies (excluding common pack
 #### Preparing Datasets and Models
 
 - **Tiny-ImageNet [[link](https://github.com/tjmoon0104/pytorch-tiny-imagenet)]**
-- 
+  
 To download and preprocess the dataset, use the following commands:
 ```bash
 cd data
