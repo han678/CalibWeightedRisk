@@ -23,11 +23,11 @@ python tiny_imagenet_utils.py
 ```
 - **CIFAR-10/100**
 
-#### Using the AURC loss in your project
+#### Using the regularized AURC loss in your project
 
 To train the model with regularized AURC loss, you can copy the file `loss/aurc.py` into your repository. 
 
-#### Train the model with AURC loss
+#### Train the model with regularized AURC loss
 
 To train the model with regularized AURC loss, use the following commands:
 ```bash
