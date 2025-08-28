@@ -1,12 +1,51 @@
 import os
 import sys
+import torch.nn as nn
+
+class SwinWithPool(nn.Module):
+    def __init__(self, base_model):
+        super().__init__()
+        self.base = base_model
+    def forward(self, x):
+        out = self.base(x)
+        if out.dim() == 4:
+            if out.shape[-1] == 200:
+                out = out.mean(dim=(1, 2))
+            elif out.shape[1] == 200:
+                out = out.mean(dim=(2, 3))
+        return out
+
 
 def get_network(args):
-    """ return given network
-    """
-        # Determine number of classes and input size based on the dataset
-    num_classes = {'cifar10': 10, 'cifar100': 100, 'svhn': 10, 'imagenet':1000, 'tiny-imagenet': 200}.get(args.dataset, 10)
-    if args.arch == 'VGG16BN':
+    """Return given network for any supported dataset"""
+    
+    # Determine number of classes based on dataset
+    num_classes = {
+        'cifar10': 10, 
+        'cifar100': 100, 
+        'svhn': 10, 
+        'imagenet': 1000, 
+        'tiny-imagenet': 200
+    }.get(args.dataset, 10)
+    
+    # Handle timm models (Vision Transformers and Swin)
+    if args.arch.lower() in ["vit_small", "vit_base", 'swin_tiny', "swin_base"]:
+        import timm
+        model_names = {
+            'vit_small': 'vit_small_patch16_224',
+            'vit_base': 'vit_base_patch16_224', 
+            'swin_tiny': 'swin_tiny_patch4_window7_224',
+            'swin_base': 'swin_base_patch4_window7_224'
+        }
+        if args.arch.lower() in ['swin_tiny', 'swin_base']:
+            net = timm.create_model(model_names[args.arch.lower()], pretrained=True, num_classes=num_classes)
+            net.head = nn.Linear(net.head.in_features, num_classes)
+            net = SwinWithPool(net)
+            return net
+        net = timm.create_model(model_names[args.arch.lower()], pretrained=True, num_classes=num_classes)
+        net.head = nn.Linear(net.head.in_features, num_classes)
+        return net
+    elif args.arch == 'VGG16BN':
         from models.vgg import VGG16BN
         net = VGG16BN(num_classes=num_classes)
     elif args.arch == 'VGG16':
@@ -81,5 +120,4 @@ def get_network(args):
     else:
         print('the network name you have entered is not supported yet')
         sys.exit()
-
     return net
