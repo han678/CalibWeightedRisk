@@ -1,4 +1,4 @@
-This repository contains the code for the paper **"Revisiting Reweighted Risk for Calibration: AURC, Focal Loss, 
+This repository contains the code for the paper **"Revisiting Reweighted Risk for Calibration: AURC, Focal, 
 and Inverse Focal Loss"** [[arxiv](https://arxiv.org/pdf/2505.23463)].
 
 #### Key Dependencies
@@ -40,7 +40,7 @@ If you found this work or code useful, please cite:
 
 ```
 @misc{zhou2025revisitingreweightedriskcalibration,
-      title={Revisiting Reweighted Risk for Calibration: AURC, Focal Loss, 
+      title={Revisiting Reweighted Risk for Calibration: AURC, Focal, 
 and Inverse Focal Loss}, 
       author={Han Zhou and Sebastian G. Gruber and Teodora Popordanoska 
 and Matthew B. Blaschko},
