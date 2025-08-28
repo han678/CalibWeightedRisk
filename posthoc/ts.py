@@ -11,7 +11,7 @@ import torch.optim as optim
 import numpy as np
 
 class TemperatureScale(nn.Module):
-    def __init__(self, temp=1.5, criterion=nn.CrossEntropyLoss(), maxiter=2000):
+    def __init__(self, temp=1.5, criterion=nn.CrossEntropyLoss(), maxiter=50):
         super().__init__()
         self.temp = nn.Parameter(torch.ones(1) * temp)
         self.criterion = criterion
@@ -51,7 +51,7 @@ class TemperatureScale(nn.Module):
         self._optimize_temp(torch.cat(logits), torch.cat(labels))
 
 class ModelWithTemperature(nn.Module):
-    def __init__(self, model, temp=1.0, maxiter=50):
+    def __init__(self, model, temp=1.5, maxiter=50):
         super().__init__()
         self.model = model
         self.model.eval()
