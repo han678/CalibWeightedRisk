@@ -3,11 +3,11 @@ import torch.nn.functional as F
 import torch
 
 class InverseFocalLoss(nn.Module):
-    def __init__(self, gamma=0, size_average=False, input_is_softmax=False):
+    def __init__(self, gamma=0, size_average=False, is_prob=False):
         super(InverseFocalLoss, self).__init__()
         self.gamma = gamma
         self.size_average = size_average
-        self.input_is_softmax = input_is_softmax
+        self.is_prob = is_prob
         self.eps = 1e-9
 
     def forward(self, input, target):
@@ -19,7 +19,7 @@ class InverseFocalLoss(nn.Module):
 
         target = target.view(-1, 1)
 
-        if self.input_is_softmax:
+        if self.is_prob:
             input = input.clamp(min=self.eps, max=1 - self.eps)
             logpt = torch.log(input)  # Use log of softmaxed input
         else:

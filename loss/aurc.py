@@ -35,6 +35,12 @@ def compute_harmonic_alphas(n, use_diagamma=True):
     else:
         return np.cumsum(1 / (n - np.arange(n)))
 
+
+def sele_alphas(n):
+    """Compute selection-based alphas."""
+    return [2 * (rank / n) for rank in range(1, n + 1)]
+
+
 # Utility functions for scoring
 def entropy(x):
     """Compute entropy of input tensor."""
@@ -53,16 +59,25 @@ def top12_margin(x):
     values, _ = torch.topk(x, k=2, dim=-1)
     return values[:, 0] - values[:, 1] if x.ndim > 1 else values[0] - values[1]
 
-def get_score_function(name: str, input_is_softmax: bool = False):
+
+def gini_score(x):
+    """Compute Gini score."""
+    return 1 - torch.norm(x, dim=1, p=2) ** 2
+
+
+def get_score_function(name: str, is_prob: bool = False):
     """Retrieve the appropriate scoring function."""
     eps = 1e-9
-    as_probs = (lambda x: x) if input_is_softmax else (lambda x: torch.clamp(F.softmax(x, dim=1), min=eps, max=1 - eps))
-    as_logits = (lambda x: inv_softmax(x)) if input_is_softmax else (lambda x: x)
+    as_probs = (lambda x: x) if is_prob else (lambda x: torch.clamp(F.softmax(x, dim=1), min=eps, max=1 - eps))
+    as_logits = (lambda x: inv_softmax(x)) if is_prob else (lambda x: x)
 
     mapping = {
         "MSP": lambda x: torch.max(as_probs(x), dim=1).values,
         "NegEntropy": lambda x: -entropy(as_logits(x)),
         "SoftmaxMargin": lambda x: top12_margin(as_probs(x)),
+        "MaxLogit": lambda x: torch.max(as_logits(x), dim=1).values,
+        "l2_norm": lambda x: torch.norm(as_probs(x), dim=1, p=2),
+        "NegGiniScore": lambda x: -gini_score(as_probs(x)),
     }
 
     if name not in mapping:
@@ -71,24 +86,25 @@ def get_score_function(name: str, input_is_softmax: bool = False):
 
 
 class BaseAURCLoss(_Loss):
-    def __init__(self, score_function="MSP", gamma=0.5, batch_size=128, reduction='sum',
-                 regularization_strength=0.05, alpha_fn=None, weight_grad=True, input_is_softmax=False):
+    def __init__(self, score_function="MSP", gamma=0.3, batch_size=128, reduction='sum',
+                 regularization_strength=0.02, alpha_fn=None, weight_grad=True, is_prob=False):
         super().__init__(reduction=reduction)
         self.gamma = gamma
         self.batch_size = batch_size
         self.weight_grad = weight_grad
-        self.input_is_softmax = input_is_softmax
+        self.is_prob = is_prob
         self.regularization_strength = regularization_strength
-        self.score_func = get_score_function(score_function, self.input_is_softmax)
+        self.score_func = get_score_function(score_function, self.is_prob)
         self.alphas = alpha_fn(batch_size) if alpha_fn else None
         self.eps = 1e-9  # small value for clamping
-        if self.input_is_softmax:
+        # Choose loss function
+        if self.is_prob:
             self.criterion = torch.nn.NLLLoss(reduction='none')
         else:
             self.criterion = torch.nn.CrossEntropyLoss(reduction='none')
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        if self.input_is_softmax:
+        if self.is_prob:
             # Clamp input directly
             scores = torch.clamp(input, min=self.eps, max=1 - self.eps).to(input.device)
             log_scores = torch.log(scores)
@@ -106,7 +122,7 @@ class BaseAURCLoss(_Loss):
                 indices_sorted = torch.argsort(confidence, descending=False)
                 reverse_indices = torch.argsort(indices_sorted)
                 reordered_alphas = torch.tensor(self.alphas, dtype=input.dtype, device=input.device)[reverse_indices]
-            if self.input_is_softmax:
+            if self.is_prob:
                 losses = self.criterion(log_scores, target) * reordered_alphas
             else:
                 losses = ce_loss * reordered_alphas
@@ -114,7 +130,7 @@ class BaseAURCLoss(_Loss):
             rank = soft_rank(confidence.unsqueeze(0), regularization="l2",
                              regularization_strength=self.regularization_strength).to(input.device)
             alphas = -torch.log(1 - rank.squeeze(0) / (self.batch_size + 1))
-            if self.input_is_softmax:
+            if self.is_prob:
                 losses = self.criterion(log_scores, target) * alphas
             else:
                 losses = ce_loss * alphas
@@ -130,8 +146,16 @@ class BaseAURCLoss(_Loss):
 # AURC loss class
 class AURCLoss(BaseAURCLoss):
     def __init__(self, gamma=0.3, batch_size=128, score_function="MSP", reduction='sum',
-                 weight_grad=True, input_is_softmax=False, regularization_strength=0.02):
+                 weight_grad=True, is_prob=False, regularization_strength=0.02):
         super().__init__(gamma=gamma, batch_size=batch_size, score_function=score_function, reduction=reduction,
                          regularization_strength=regularization_strength, alpha_fn=compute_harmonic_alphas,
-                         weight_grad=weight_grad, input_is_softmax=input_is_softmax)
+                         weight_grad=weight_grad, is_prob=is_prob)
 
+
+# Selection-based loss class
+class SeleLoss(BaseAURCLoss):
+    def __init__(self, gamma=0.3, batch_size=128, score_function="MSP", reduction='sum',
+                 regularization_strength=0.02, weight_grad=True, is_prob=False):
+        super().__init__(gamma=gamma, batch_size=batch_size, score_function=score_function, reduction=reduction,
+                         regularization_strength=regularization_strength, alpha_fn=sele_alphas,
+                         weight_grad=weight_grad, is_prob=is_prob)

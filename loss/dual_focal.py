@@ -9,11 +9,11 @@ import torch.nn.functional as F
 
 
 class DualFocalLoss(nn.Module):
-    def __init__(self, gamma=0, size_average=False, input_is_softmax=False):
+    def __init__(self, gamma=0, size_average=False, is_prob=False):
         super(DualFocalLoss, self).__init__()
         self.gamma = gamma
         self.size_average = size_average
-        self.input_is_softmax = input_is_softmax
+        self.is_prob = is_prob
         self.eps = 1e-9
 
     def forward(self, input, target):
@@ -23,7 +23,7 @@ class DualFocalLoss(nn.Module):
             input = input.contiguous().view(-1, input.size(2))  # N,H*W,C => N*H*W,C
         target = target.view(-1, 1)
 
-        if self.input_is_softmax:
+        if self.is_prob:
             input = input.clamp(min=self.eps, max=1 - self.eps)
             logp_k = torch.log(input)
         else:

@@ -12,20 +12,20 @@ class ECE_KDELoss(torch.nn.Module):
     Compute ECE (Expected Calibration Error)
     """
 
-    def __init__(self, p=1, mc_type='canonical', gamma=0.3, input_is_softmax=False):
+    def __init__(self, p=1, mc_type='canonical', gamma=0.3, is_prob=False):
         super(ECE_KDELoss, self).__init__()
         self.p = p
         self.mc_type = mc_type
         self.gamma = gamma
         self.eps = 1e-9
-        self.input_is_softmax = input_is_softmax
-        if self.input_is_softmax:
+        self.is_prob = is_prob
+        if self.is_prob:
             self.criterion = torch.nn.NLLLoss()
         else:
             self.criterion = torch.nn.CrossEntropyLoss()
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        if self.input_is_softmax:
+        if self.is_prob:
             scores = torch.clamp(input, min=self.eps, max=1 - self.eps).to(input.device)
         else:
             scores = torch.clamp(F.softmax(input, dim=1), min=self.eps, max=1 - self.eps).to(input.device)
@@ -40,7 +40,7 @@ def get_bandwidth(f, device):
     """
     Select a bandwidth for the kernel based on maximizing the leave-one-out likelihood (LOO MLE).
 
-    :param f: The vector containing the probability scores, shape [num_samples, num_classes]
+    :param f: The vector containing the is_probability scores, shape [num_samples, num_classes]
     :param device: The device type: 'cpu' or 'cuda'
 
     :return: The bandwidth of the kernel
@@ -66,7 +66,7 @@ def get_ece_kde(f, y, bandwidth, p, mc_type, device):
     """
     Calculate an estimate of Lp calibration error.
 
-    :param f: The vector containing the probability scores, shape [num_samples, num_classes]
+    :param f: The vector containing the is_probability scores, shape [num_samples, num_classes]
     :param y: The vector containing the labels, shape [num_samples]
     :param bandwidth: The bandwidth of the kernel
     :param p: The p-norm. Typically, p=1 or p=2
