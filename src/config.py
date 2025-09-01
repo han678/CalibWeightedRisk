@@ -101,7 +101,7 @@ def create_parser(description='Training a selective classifier', default_dataset
     
     # Loss-specific parameters
     parser.add_argument('--seed', default=10, type=int)
-    parser.add_argument('--gamma', type=float, default=None, help='Gamma value for focal/inverse_focal/dual_focal/aurc')
+    parser.add_argument('--gamma', type=float, default=None, help='Gamma value for inverse_focal/dual_focal/aurc')
     parser.add_argument('--weight_grad', type=str2bool, default=True, 
                         help='Whether to consider weight gradient for AURC loss')
     parser.add_argument('--regularization_strength', default=0.05, type=float, 
