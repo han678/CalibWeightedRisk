@@ -25,8 +25,7 @@ To train the model with select AU loss, you can copy the file `loss/select_au.py
 
 To train the model with select AU loss, use the following commands:
 ```bash
-cd src
-python train.py
+python src/train.py --arch vit_small --dataset tiny-imagenet --loss_type select_au --seed 40 --score_function MSP --workers 1
 ```
 
 #### Reference
