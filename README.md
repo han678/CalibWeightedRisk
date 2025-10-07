@@ -21,7 +21,7 @@ python tiny_imagenet_utils.py
 
 To train the model with select AU loss, you can copy the file `loss/select_au.py` into your repository. 
 
-#### Train the model with regularized AURC loss
+#### Train the model with select AU loss
 
 To train the model with select AU loss, use the following commands:
 ```bash
