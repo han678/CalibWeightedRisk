@@ -5,12 +5,6 @@ and Inverse Focal Loss"** [[arxiv](https://arxiv.org/pdf/2505.23463)].
 To run the code, you will need the following dependencies (excluding common packages like `scipy`, `numpy`, and `torch`):
 
 - **Python** ≥ 3.8
-- **torchsort**: A library that implements fast, differentiable sorting and ranking in PyTorch. [Learn more here](https://github.com/google-research/fast-soft-sort).
-
-  Install via pip:
-  ```bash
-  pip install torchsort
-  ```
 
 #### Preparing Datasets and Models
 
@@ -23,16 +17,16 @@ python tiny_imagenet_utils.py
 ```
 - **CIFAR-10/100**
 
-#### Using the regularized AURC loss in your project
+#### Using the select AU loss in your project
 
-To train the model with regularized AURC loss, you can copy the file `loss/aurc.py` into your repository. 
+To train the model with select AU loss, you can copy the file `loss/select_au.py` into your repository. 
 
 #### Train the model with regularized AURC loss
 
-To train the model with regularized AURC loss, use the following commands:
+To train the model with select AU loss, use the following commands:
 ```bash
 cd src
-python main.py
+python train.py
 ```
 
 #### Reference
