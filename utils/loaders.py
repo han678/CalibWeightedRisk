@@ -6,6 +6,8 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import train_test_split
 
+def identity(x):
+    return x
 
 def get_transforms(dataset_name, arch='resnet50'):
     """Get training and testing transforms for different datasets."""
@@ -19,19 +21,19 @@ def get_transforms(dataset_name, arch='resnet50'):
         input_size = 64   # Keep native size for tiny-imagenet
     else:  # CIFAR-10, CIFAR-100, SVHN
         input_size = 32   # Native CIFAR size
-    
+
     if dataset_name == 'cifar10':
         # Use consistent CIFAR-10 normalization values
         normalize = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
         transform_train = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
-            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(identity),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize
         ])
         transform_test = transforms.Compose([
-            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(identity),
             transforms.ToTensor(),
             normalize
         ])
@@ -40,13 +42,13 @@ def get_transforms(dataset_name, arch='resnet50'):
         normalize = transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761))
         transform_train = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
-            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(identity),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize
         ])
         transform_test = transforms.Compose([
-            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(identity),
             transforms.ToTensor(),
             normalize
         ])
@@ -54,12 +56,12 @@ def get_transforms(dataset_name, arch='resnet50'):
         normalize = transforms.Normalize((0.4377, 0.4438, 0.4728), (0.1980, 0.2010, 0.1970))
         transform_train = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
-            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(identity),
             transforms.ToTensor(),
             normalize
         ])
         transform_test = transforms.Compose([
-            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(identity),
             transforms.ToTensor(),
             normalize
         ])
@@ -71,7 +73,7 @@ def get_transforms(dataset_name, arch='resnet50'):
             normalize
         ])
         transform_test = transforms.Compose([
-            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 32 else transforms.Lambda(identity),
             transforms.ToTensor(),
             normalize
         ])
@@ -79,12 +81,12 @@ def get_transforms(dataset_name, arch='resnet50'):
         # Use Tiny-ImageNet specific normalization values consistently
         normalize = transforms.Normalize([0.4802, 0.4481, 0.3975], [0.2302, 0.2265, 0.2262])
         transform_train = transforms.Compose([
-            transforms.Resize(input_size) if input_size != 64 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 64 else transforms.Lambda(identity),
             transforms.ToTensor(),
             normalize
         ])
         transform_test = transforms.Compose([
-            transforms.Resize(input_size) if input_size != 64 else transforms.Lambda(lambda x: x),
+            transforms.Resize(input_size) if input_size != 64 else transforms.Lambda(identity),
             transforms.ToTensor(),
             normalize
         ])
@@ -178,17 +180,6 @@ def train_val_split(args):
             pin_memory=True,
             persistent_workers=True if num_workers > 0 else False
         )
-
-        # # 在train_loader和val_loader循环前加
-        # for images, labels in train_loader:
-        #     print('Train labels min:', labels.min().item(), 'max:', labels.max().item())
-        #     break
-
-        # val_labels = []
-        # for _, labels in val_loader:
-        #     val_labels.extend(labels.cpu().numpy().tolist())
-        # print("Val unique labels:", sorted(set(val_labels)))
-        
     else:
         # CIFAR/SVHN: Split train set
         print("Splitting training set into train/val (5000 samples for validation)")
