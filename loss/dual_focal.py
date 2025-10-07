@@ -9,10 +9,10 @@ import torch.nn.functional as F
 
 
 class DualFocalLoss(nn.Module):
-    def __init__(self, gamma=0, size_average=False, is_prob=False):
+    def __init__(self, gamma=0, reduction='mean', is_prob=False):
         super(DualFocalLoss, self).__init__()
         self.gamma = gamma
-        self.size_average = size_average
+        self.reduction = reduction
         self.is_prob = is_prob
         self.eps = 1e-9
 
@@ -36,8 +36,11 @@ class DualFocalLoss(nn.Module):
         p_j_mask = torch.lt(softmax_logits, p_k.reshape(p_k.shape[0], 1)) * 1  # mask all logits larger and equal than p_k
         p_j = torch.topk(p_j_mask * softmax_logits, 1)[0].squeeze()
         loss = -1 * (1 - p_k + p_j) ** self.gamma * logp_k
-        if self.size_average:
+
+        if self.reduction == 'mean':
             return loss.mean()
-        else:
+        elif self.reduction == 'sum':
             return loss.sum()
+        else:
+            return loss
 

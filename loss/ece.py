@@ -219,16 +219,3 @@ class Ece(nn.Module):
                     return (all_ece.sum() / valid_classes).item()
             else:
                 return 0.0
-
-# Updated convenience function
-def compute_ece(logits, labels, n_bins=15, adaptive=False, classwise=False, return_per_class=False):
-    """Ultra-fast ECE computation."""
-    with torch.no_grad():
-        if classwise or adaptive:
-            # Use optimized class for complex cases
-            ece_calc = Ece(p=1, n_bins=n_bins, version="not-our", 
-                           adaptive_bins=adaptive, classwise=classwise, prob=False, return_per_class=return_per_class)
-            return ece_calc(logits=logits, labels=labels)
-        else:
-            # Use ultra-fast implementation for simple global ECE
-            return fast_ece_vectorized(logits, labels, n_bins)

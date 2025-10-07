@@ -9,38 +9,38 @@ import torch.nn.functional as F
 import torch
 
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=None, size_average=False, is_prob=False):
+    def __init__(self, gamma=None, reduction='mean', is_prob=False):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
-        self.size_average = size_average
+        self.reduction = reduction
         self.is_prob = is_prob
         self.eps = 1e-9
 
     def forward(self, input, target):
-        # validate_input(input, target)
         if input.dim() > 2:
-            input = input.view(input.size(0), input.size(1), -1)  # N,C,H,W => N,C,H*W
-            input = input.transpose(1, 2)  # N,C,H*W => N,H*W,C
-            input = input.contiguous().view(-1, input.size(2))  # N,H*W,C => N*H*W,C
+            input = input.view(input.size(0), input.size(1), -1)
+            input = input.transpose(1, 2)
+            input = input.contiguous().view(-1, input.size(2))
         target = target.view(-1, 1)
         if self.is_prob:
-            logpt = torch.log(input) 
+            input = torch.clamp(input, min=self.eps, max=1 - self.eps)  # 防止 log(0)
+            logpt = torch.log(input)
         else:
-            logpt = F.log_softmax(input, dim=1)  # Apply log_softmax to logits
+            logpt = F.log_softmax(input, dim=1)
         logpt = logpt.gather(1, target)
         logpt = logpt.view(-1)
         pt = logpt.exp()
-        # Set gamma based on pt
         if self.gamma is None:
             gamma = torch.where(pt < 0.2, torch.tensor(5.0, device=pt.device), torch.tensor(3.0, device=pt.device))
         else:
             gamma = self.gamma
-
         loss = -1 * (1 - pt) ** gamma * logpt
-        if self.size_average:
+        if self.reduction == 'mean':
             return loss.mean()
-        else:
+        elif self.reduction == 'sum':
             return loss.sum()
+        else:
+            return loss
 
 def validate_input(logits, labels):
     # logits: [batch, num_classes]

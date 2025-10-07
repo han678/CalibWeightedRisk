@@ -3,10 +3,10 @@ import torch.nn.functional as F
 import torch
 
 class InverseFocalLoss(nn.Module):
-    def __init__(self, gamma=0, size_average=False, is_prob=False):
+    def __init__(self, gamma=0, reduction='mean', is_prob=False):
         super(InverseFocalLoss, self).__init__()
         self.gamma = gamma
-        self.size_average = size_average
+        self.reduction = reduction
         self.is_prob = is_prob
         self.eps = 1e-9
 
@@ -29,7 +29,9 @@ class InverseFocalLoss(nn.Module):
         logpt = logpt.view(-1)
         pt = torch.clamp(logpt.exp(), min=self.eps, max=1 - self.eps)
         loss = -1 * (1 + pt) ** self.gamma * logpt
-        if self.size_average:
+        if self.reduction == 'mean':
             return loss.mean()
-        else:
+        elif self.reduction == 'sum':
             return loss.sum()
+        else:
+            return loss
