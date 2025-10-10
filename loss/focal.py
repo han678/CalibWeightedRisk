@@ -41,12 +41,3 @@ class FocalLoss(nn.Module):
             return loss.sum()
         else:
             return loss
-
-def validate_input(logits, labels):
-    # logits: [batch, num_classes]
-    # labels: [batch]
-    num_classes = logits.shape[1]
-    assert labels.dim() == 1, f"labels should be 1D, got {labels.shape}"
-    assert labels.min() >= 0 and labels.max() < num_classes, f"labels out of range: {labels.min()} ~ {labels.max()}, num_classes={num_classes}"
-    assert logits.shape[0] == labels.shape[0], f"batch size mismatch: logits {logits.shape}, labels {labels.shape}"
-

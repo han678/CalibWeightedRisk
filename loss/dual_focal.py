@@ -43,4 +43,3 @@ class DualFocalLoss(nn.Module):
             return loss.sum()
         else:
             return loss
-
