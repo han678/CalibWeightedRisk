@@ -250,12 +250,12 @@ def main(args):
         print(f'\nEpoch {epoch}/{args.epochs}:')
         train_start_time = time.time()
         train_loss, train_acc1 = train(model, train_loader, loss_fn, optimizer, scaler, use_amp=args.use_amp)
-        if loss_type == "select_au":
-            loss_fn.hist_cdf.clear()
         train_time = time.time() - train_start_time
         scheduler.step()
         eval_start_time = time.time()
         val_res = evaluate_simple(model, val_loader, loss_fn)
+        if loss_type == "select_au":
+            loss_fn.hist_cdf.clear()
         train_log.append([
             epoch, train_acc1, train_loss, val_res["loss"], val_res["acc_1"], val_res["acc_5"], val_res["ece"]])
         should_save = epoch >= save_criteria['warmup_epoch']
