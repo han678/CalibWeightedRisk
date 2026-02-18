@@ -1,0 +1,49 @@
+load_pretrain: 1
+use_amp: true
+batch_size: 256
+epochs: 90
+lr: 0.0001
+weight_decay: 0.0005
+momentum: 0.9
+milestones:
+- 30
+- 60
+lr_gamma: 0.1
+optimizer: sgd
+scheduler: cosine
+loss_type: select_au
+loss_configs:
+  select_au:
+    conf_quantile: 0.4
+    hist_sigma: 0.05
+    score_function: NegEntropy
+    reduction: mean
+    is_prob: false
+    batch_size: 256
+  aurc:
+    gamma: 1.0
+    weight_grad: false
+    regularization_strength: 0.05
+    is_prob: false
+    batch_size: 256
+    score_function: NegEntropy
+    reduction: mean
+  focal:
+    gamma: null
+    is_prob: false
+    reduction: mean
+  dual_focal:
+    gamma: 1.0
+    is_prob: false
+    reduction: mean
+  inverse_focal:
+    gamma: 1.0
+    is_prob: false
+    reduction: mean
+  ece_kde:
+    gamma: 0.3
+    is_prob: false
+    p: 1
+    mc_type: canonical
+  ce:
+    reduction: mean
